@@ -11,7 +11,7 @@
 # Installation
 
  - create a virtualenv and activate it.
- - ``pip install mechanize beautifulsoup4``
+ - ``pip install -r requirements.txt``
 
 # Usage
 
