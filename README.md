@@ -5,7 +5,7 @@
 
 # Foundations
 
- - [dkb-visa from hoffie](https://github.com/hoffie/dkb-visa) (also [forked by me from hoffie](https://github.com/hoffie/dkb-visa)) is the basis for all of this.
+ - [dkb-visa from hoffie](https://github.com/hoffie/dkb-visa) is the basis for all of this.
  - [dkbweb from tom08z](https://code.google.com/p/dkbweb/) Automatically exported from code.google.com/p/dkbweb and not written by me (inktrap). This needs dkb-visa which is already integrated in my version.
 
 # Installation
