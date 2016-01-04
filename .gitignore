@@ -1,3 +1,4 @@
 *.pyc
 *.qif
 .env
+export.sh
