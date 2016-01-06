@@ -2,3 +2,4 @@
 *.qif
 .env
 export.sh
+*.out

@@ -28,6 +28,7 @@ import sys
 import logging
 from bs4 import BeautifulSoup
 from mechanize import Browser
+import time
 
 DEBUG = False
 
@@ -131,9 +132,11 @@ class DkbScraper(dkb.DkbScraper):
             # find right bank account...
             for label in item.get_labels():
                 ls = label.text.split("/") # I don't know if it's better to extract the bank account number using regex
-                if len(ls) > 2 and ls[1].strip().split()[-1] == baid:
-                    form.set_value([item.name], name=ba_list.name, type="select")
-                    return
+                if len(ls) > 2:
+                    acc = ls[1].strip().split()[-1]
+                    if ((len(baid) == 4) and (baid == acc[-4:])) or (baid == acc):
+                        form.set_value([item.name], name=ba_list.name, type="select")
+                        return
 
         raise RuntimeError("Unable to find the right bank account")
 
@@ -207,6 +210,10 @@ if __name__ == '__main__':
         return date and bool(re.match('^\d{1,2}\.\d{1,2}\.\d{2,5}\Z', date))
 
     from_date = args.from_date
+    if not args.from_date:
+        from_date = "01.01.1970"
+    if not args.to_date:
+        to_date = time.strftime("%d.%m.%Y")
     while not is_valid_date(from_date):
         from_date = raw_input("Start time: ")
     if not is_valid_date(args.to_date):

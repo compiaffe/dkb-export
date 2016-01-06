@@ -16,3 +16,4 @@
 # Usage
 
  - see README-dkb-visa-hoffie.rst for now
+ - provide the last for digits of your card-id
