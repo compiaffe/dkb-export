@@ -257,9 +257,14 @@ if __name__ == '__main__':
         else:
             f = open(args.output, 'w')
         f.write(csv_text)
-    else:
-        dkb2qif = dkb.DkbConverter(csv_text, cc_name=args.qif_account)
-        dkb2qif.export_to(args.output)
+
+    # always create the qiv file as well
+    dkb2qif = dkb.DkbConverter(csv_text, cc_name=args.qif_account)
+    if re.match(r'^.*\.csv$', args.output):
+        args.output = re.sub(r'\.csv$', '', args.output) + ".qif"
+    elif not re.match(r'^.*\.qif$', args.output):
+        args.output = args.output + ".qif"
+    dkb2qif.export_to(args.output)
 
     fetcher.logout()
 
