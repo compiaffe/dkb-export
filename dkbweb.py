@@ -23,12 +23,15 @@
 
 import dkb
 import re
-import csv
 import sys
 import logging
 from bs4 import BeautifulSoup
-from mechanize import Browser
+#from mechanize import Browser
+from datetime import date
+from datetime import datetime
 import time
+#import codecs
+import os
 
 DEBUG = False
 
@@ -36,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 class DkbScraper(dkb.DkbScraper):
     LOGOUTURL = "https://banking.dkb.de/dkb/-?$part=DkbTransactionBanking.infobar.logout-button&$event=logout"
-    
+
     def bank_account_transactions_overview(self):
         """
         Navigates the internal browser state to the bank account
@@ -44,7 +47,7 @@ class DkbScraper(dkb.DkbScraper):
         """
         logger.info("Navigating to 'Kontoumsätze'...")
         br = self.br
-        overview_html = BeautifulSoup(br.response().read())
+        BeautifulSoup(br.response().read(), "html.parser")
         for link in br.links():
             if re.search("Kontoums.*tze", link.text, re.I):
                 br.follow_link(link)
@@ -165,7 +168,6 @@ class DkbScraper(dkb.DkbScraper):
         Performs the logout process so that the session is closed on the DKB server.
         """
         self.br.open(self.LOGOUTURL)
-        
 
 
 if __name__ == '__main__':
@@ -175,7 +177,6 @@ if __name__ == '__main__':
     """
     from getpass import getpass
     from argparse import ArgumentParser
-    from datetime import date
 
     logging.basicConfig(level=logging.DEBUG)
 
@@ -211,7 +212,15 @@ if __name__ == '__main__':
 
     from_date = args.from_date
     if not args.from_date:
-        from_date = "01.01.1970"
+        # one year should be enough
+        #from_date = (datetime.datetime.now() - relativedelta(years=1)).strftime("%d.%m.%Y")
+        d = date.today()
+        years = -1
+        try:
+            from_date = d.replace(year = d.year + years)
+        except ValueError:
+            from_date = d + (date(d.year + years, 1, 1) - date(d.year, 1, 1))
+        from_date = from_date.strftime("%d.%m.%Y")
     if not args.to_date:
         to_date = time.strftime("%d.%m.%Y")
     while not is_valid_date(from_date):
@@ -225,7 +234,6 @@ if __name__ == '__main__':
         pin = args.pin
     else:
         pin = ""
-        import os
         if os.isatty(0):
             while not pin.strip():
                 pin = getpass('PIN: ')
@@ -246,25 +254,108 @@ if __name__ == '__main__':
     if args.baid:
         fetcher.bank_account_transactions_overview()
         fetcher.select_transactions_ba(args.baid, from_date, args.to_date)
+        start=7
     elif args.cardid:
         fetcher.credit_card_transactions_overview()
         fetcher.select_transactions(args.cardid, from_date, args.to_date)
+        start=8
+
+    # create a formatter to get the default output encoding
+    dummyqif = dkb.DkbConverter("")
+
     csv_text = fetcher.get_transaction_csv()
 
-    if args.raw:
-        if args.output == '-':
-            f = sys.stdout
-        else:
-            f = open(args.output, 'w')
-        f.write(csv_text)
+    if args.output == '-':
+        f = sys.stdout
+    else:
+        if not re.match(r'^.*\.csv$', args.output):
+            args.output += ".csv"
+        f = open(args.output, 'w')
 
-    # always create the qiv file as well
-    dkb2qif = dkb.DkbConverter(csv_text, cc_name=args.qif_account)
-    if re.match(r'^.*\.csv$', args.output):
-        args.output = re.sub(r'\.csv$', '', args.output) + ".qif"
-    elif not re.match(r'^.*\.qif$', args.output):
-        args.output = args.output + ".qif"
-    dkb2qif.export_to(args.output)
+    csv_text = csv_text.decode(dummyqif.INPUT_CHARSET)
+
+    if os.path.isfile(args.output + '.old'):
+        logger.info("Checking for duplicates with %s" % args.output + '.old')
+        with open(args.output + '.old', 'r') as fh:
+            old_transactions = set(fh.read().decode(dummyqif.OUTPUT_CHARSET).splitlines()[start:])
+            logger.info("Found %i old transactions (already stored)" % len(old_transactions))
+            fh.close()
+        csv_text = set(csv_text.splitlines()[start:])
+        logger.info("Found %i transactions in the exported file" % len(csv_text))
+        # have the new - the old transactions
+        csv_text_diff = list(csv_text - old_transactions)
+        logger.info("Found %i transactions in the exported file that are not old" % len(csv_text_diff))
+        # naive sorting
+        csv_text = '\n'.join(sorted(csv_text_diff, reverse=True))
+        # append the additional transactions to the old transactions
+        if (len(csv_text_diff) > 0):
+            with open(args.output + '.old', 'a') as fh:
+                logger.info("Appending %i new transactions to %s" % (len(csv_text_diff), args.output + '.old'))
+                fh.write(csv_text.encode(dummyqif.OUTPUT_CHARSET))
+                fh.close()
+    else:
+        logger.info("Creating file of imported transactions %s" % args.output + ".old")
+        transactions = csv_text.splitlines()[start:]
+        logger.info("Found %i transactions and %i unique transactions" % (len(transactions), len(set(transactions))))
+        with open(args.output + '.old', 'w') as fh:
+            fh.write(csv_text.encode(dummyqif.OUTPUT_CHARSET))
+            fh.close()
+
+    if len(csv_text) > 0:
+        logger.info("Writing new transactions to %s" % args.output)
+        f.write(csv_text.encode(dummyqif.OUTPUT_CHARSET))
+
+        # and now back again :(
+        csv_text = csv_text.encode(dummyqif.INPUT_CHARSET)
+        # always create the qiv file
+        dkb2qif = dkb.DkbConverter(csv_text, cc_name=args.qif_account)
+        if args.baid:
+            # reconfigure the columns so they match the format for the banking-account
+            '''
+            banking account fields:
+            0 "Buchungstag";
+            1 "Wertstellung";
+            2 "Buchungstext";
+            3 "Auftraggeber / Begünstigter";
+            4 "Verwendungszweck";
+            5 "Kontonummer";
+            6 "BLZ";
+            7 "Betrag (EUR)";
+            8 "Gläubiger-ID";
+            9 "Mandatsreferenz";
+            10 "Kundenreferenz";
+
+            visa card fields:
+            0 "Umsatz abgerechnet";
+            1 "Wertstellung";
+            2 "Belegdatum";
+            3 "Beschreibung";
+            4 "Betrag (EUR)";
+            5 "Ursprünglicher Betrag";
+            '''
+
+            dkb2qif.COL_DATE = 1
+            dkb2qif.COL_VALUTA_DATE = 1
+            dkb2qif.COL_DESC = 4
+            dkb2qif.COL_VALUE = 7
+            # this column is always empty, at least for my banking-data
+            dkb2qif.COL_INFO = 7
+
+        if re.match(r'^.*\.csv$', args.output):
+            args.output = re.sub(r'\.csv$', '', args.output) + ".qif"
+        elif not re.match(r'^.*\.qif$', args.output):
+            args.output = args.output + ".qif"
+
+        #dkb2qif.export_to(args.output)
+
+        # keep all the old .qif files, so the history of transactions is reproducible
+        # and the files sort by date
+        file_name = os.path.join(os.path.dirname(args.output), \
+                datetime.datetime.now().strftime("%Y.%m.%d-%H:%M:%S")) + ".qif"
+        logger.info("Writing unique transactions to unique file: %s" % file_name)
+        dkb2qif.export_to(file_name)
+    else:
+        logger.info("Doing nothing, no new transactions.")
 
     fetcher.logout()
 

@@ -92,6 +92,9 @@ class DkbScraper(object):
         # long (infinite?) sleep() call
         br.set_handle_refresh(False)
 
+        if not re.match(r"https://", self.BASEURL):
+            print("Only use https URLS!")
+            sys.exit(1)
         br.open(self.BASEURL + '?$javascript=disabled')
 
         # select login form:
@@ -238,7 +241,7 @@ class DkbScraper(object):
         @return file-like response
         """
         logger.info("Requesting CSV data...")
-        self.br.follow_link(url_regex='csv')
+        self.br.follow_link(url_regex='event=csvExport')
         return self.br.response().read()
 
 

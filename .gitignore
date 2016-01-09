@@ -1,5 +1,9 @@
 *.pyc
 *.qif
+*.csv
 .env
 export.sh
+*.old
 *.out
+prototype.py
+test.py
