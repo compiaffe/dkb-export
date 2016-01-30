@@ -302,8 +302,12 @@ class DkbConverter(object):
         @param list line
         @return str
         """
-        return re.sub('.*?(\d{1,2})\.(\d{1,2})\.(\d{2,4}).*?', r'\2/\1/\3',
-            line[self.COL_VALUTA_DATE])
+        if len(line[self.COL_VALUTA_DATE].strip()) == 0:
+            return re.sub('.*?(\d{1,2})\.(\d{1,2})\.(\d{2,4}).*?', r'\2/\1/\3',
+                line[self.COL_DATE])
+        else:
+            return re.sub('.*?(\d{1,2})\.(\d{1,2})\.(\d{2,4}).*?', r'\2/\1/\3',
+                line[self.COL_VALUTA_DATE])
 
     def format_value(self, line):
         """

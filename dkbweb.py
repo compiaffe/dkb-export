@@ -169,6 +169,29 @@ class DkbScraper(dkb.DkbScraper):
         """
         self.br.open(self.LOGOUTURL)
 
+def scrape_page():
+    fetcher = DkbScraper()
+
+    if DEBUG:
+        logger = logging.getLogger("mechanize")
+        logger.addHandler(logging.StreamHandler(sys.stdout))
+        logger.setLevel(logging.INFO)
+        #fetcher.br.set_debug_http(True)
+        fetcher.br.set_debug_responses(True)
+        #fetcher.br.set_debug_redirects(True)
+
+    fetcher.login(args.userid, pin)
+    if args.baid:
+        fetcher.bank_account_transactions_overview()
+        fetcher.select_transactions_ba(args.baid, from_date, args.to_date)
+    elif args.cardid:
+        fetcher.credit_card_transactions_overview()
+        fetcher.select_transactions(args.cardid, from_date, args.to_date)
+
+    csv_text = fetcher.get_transaction_csv()
+    # the logout should happen here
+    fetcher.logout()
+    return csv_text
 
 if __name__ == '__main__':
     """
@@ -189,6 +212,8 @@ if __name__ == '__main__':
         help="Full bank account number")
     cli.add_argument("--cardid",
         help="Last 4 digits of your card number")
+    cli.add_argument("--input", "-i",
+        help="Input path (CSV)")
     cli.add_argument("--output", "-o",
         help="Output path (QIF)")
     cli.add_argument("--qif-account",
@@ -213,7 +238,7 @@ if __name__ == '__main__':
     from_date = args.from_date
     if not args.from_date:
         # one year should be enough
-        #from_date = (datetime.datetime.now() - relativedelta(years=1)).strftime("%d.%m.%Y")
+        #from_date = (datetime.now() - relativedelta(years=1)).strftime("%d.%m.%Y")
         d = date.today()
         years = -1
         try:
@@ -229,6 +254,8 @@ if __name__ == '__main__':
         cli.error("Please specify a valid end time")
     if not args.output:
         cli.error("Please specify a valid output path")
+    if args.input:
+        logger.info("Won't fetch data. Just converting the csv-file")
 
     if args.pin:
         pin = args.pin
@@ -240,30 +267,63 @@ if __name__ == '__main__':
         else:
             pin = sys.stdin.read().strip()
 
-    fetcher = DkbScraper()
-
-    if DEBUG:
-        logger = logging.getLogger("mechanize")
-        logger.addHandler(logging.StreamHandler(sys.stdout))
-        logger.setLevel(logging.INFO)
-        #fetcher.br.set_debug_http(True)
-        fetcher.br.set_debug_responses(True)
-        #fetcher.br.set_debug_redirects(True)
-
-    fetcher.login(args.userid, pin)
-    if args.baid:
-        fetcher.bank_account_transactions_overview()
-        fetcher.select_transactions_ba(args.baid, from_date, args.to_date)
-        start=7
-    elif args.cardid:
-        fetcher.credit_card_transactions_overview()
-        fetcher.select_transactions(args.cardid, from_date, args.to_date)
-        start=8
-
     # create a formatter to get the default output encoding
     dummyqif = dkb.DkbConverter("")
 
-    csv_text = fetcher.get_transaction_csv()
+    if args.baid:
+        start=7
+    elif args.cardid:
+        start=8
+
+    if args.input:
+        with open(args.input, 'r') as fh:
+            logger.info("Reading from %s" % args.input)
+            csv_text=fh.read()
+            csv_text = csv_text.decode(dummyqif.OUTPUT_CHARSET)
+    else:
+        csv_text=scrape_page()
+        csv_text = csv_text.decode(dummyqif.INPUT_CHARSET)
+
+    # check that unparseable lines are not included as transactions
+    # dkb should really fix their csv export, they should have the
+    # money for that, right?
+    csv_text = csv_text.splitlines()
+    csv_text_filtered = []
+    for line in csv_text:
+        if "<br />" in line:
+            continue
+        else:
+            csv_text_filtered.append(line)
+    csv_text = "\n".join(csv_text_filtered)
+
+    # deduplication
+    if not args.input:
+        if os.path.isfile(args.output + '.old'):
+            logger.info("Checking for duplicates with %s" % args.output + '.old')
+            with open(args.output + '.old', 'r') as fh:
+                old_transactions = set(fh.read().decode(dummyqif.OUTPUT_CHARSET).splitlines()[start:])
+                logger.info("Found %i old transactions (already stored)" % len(old_transactions))
+                fh.close()
+            csv_text = set(csv_text.splitlines()[start:])
+            logger.info("Found %i transactions in the exported file" % len(csv_text))
+            # have the new - the old transactions
+            csv_text_diff = list(csv_text - old_transactions)
+            logger.info("Found %i transactions in the exported file that are not old" % len(csv_text_diff))
+            # naive sorting
+            csv_text = '\n'.join(sorted(csv_text_diff, reverse=True))
+            # append the additional transactions to the old transactions
+            if (len(csv_text_diff) > 0):
+                with open(args.output + '.old', 'a') as fh:
+                    logger.info("Appending %i new transactions to %s" % (len(csv_text_diff), args.output + '.old'))
+                    fh.write(csv_text.encode(dummyqif.OUTPUT_CHARSET))
+                    fh.close()
+        else:
+            logger.info("Creating file of imported transactions %s" % args.output + ".old")
+            transactions = csv_text.splitlines()[start:]
+            logger.info("Found %i transactions and %i unique transactions" % (len(transactions), len(set(transactions))))
+            with open(args.output + '.old', 'w') as fh:
+                fh.write(csv_text.encode(dummyqif.OUTPUT_CHARSET))
+                fh.close()
 
     if args.output == '-':
         f = sys.stdout
@@ -271,35 +331,6 @@ if __name__ == '__main__':
         if not re.match(r'^.*\.csv$', args.output):
             args.output += ".csv"
         f = open(args.output, 'w')
-
-    csv_text = csv_text.decode(dummyqif.INPUT_CHARSET)
-
-    if os.path.isfile(args.output + '.old'):
-        logger.info("Checking for duplicates with %s" % args.output + '.old')
-        with open(args.output + '.old', 'r') as fh:
-            old_transactions = set(fh.read().decode(dummyqif.OUTPUT_CHARSET).splitlines()[start:])
-            logger.info("Found %i old transactions (already stored)" % len(old_transactions))
-            fh.close()
-        csv_text = set(csv_text.splitlines()[start:])
-        logger.info("Found %i transactions in the exported file" % len(csv_text))
-        # have the new - the old transactions
-        csv_text_diff = list(csv_text - old_transactions)
-        logger.info("Found %i transactions in the exported file that are not old" % len(csv_text_diff))
-        # naive sorting
-        csv_text = '\n'.join(sorted(csv_text_diff, reverse=True))
-        # append the additional transactions to the old transactions
-        if (len(csv_text_diff) > 0):
-            with open(args.output + '.old', 'a') as fh:
-                logger.info("Appending %i new transactions to %s" % (len(csv_text_diff), args.output + '.old'))
-                fh.write(csv_text.encode(dummyqif.OUTPUT_CHARSET))
-                fh.close()
-    else:
-        logger.info("Creating file of imported transactions %s" % args.output + ".old")
-        transactions = csv_text.splitlines()[start:]
-        logger.info("Found %i transactions and %i unique transactions" % (len(transactions), len(set(transactions))))
-        with open(args.output + '.old', 'w') as fh:
-            fh.write(csv_text.encode(dummyqif.OUTPUT_CHARSET))
-            fh.close()
 
     if len(csv_text) > 0:
         logger.info("Writing new transactions to %s" % args.output)
@@ -338,8 +369,8 @@ if __name__ == '__main__':
             dkb2qif.COL_VALUTA_DATE = 1
             dkb2qif.COL_DESC = 4
             dkb2qif.COL_VALUE = 7
-            # this column is always empty, at least for my banking-data
-            dkb2qif.COL_INFO = 7
+            dkb2qif.COL_INFO = 3
+            dkb2qif.SKIP_LINES = 7
 
         if re.match(r'^.*\.csv$', args.output):
             args.output = re.sub(r'\.csv$', '', args.output) + ".qif"
@@ -350,14 +381,14 @@ if __name__ == '__main__':
 
         # keep all the old .qif files, so the history of transactions is reproducible
         # and the files sort by date
-        file_name = os.path.join(os.path.dirname(args.output), \
-                datetime.datetime.now().strftime("%Y.%m.%d-%H:%M:%S")) + ".qif"
+        file_name = os.path.join(os.path.dirname(args.output),
+                os.path.basename(args.output).split(".")[0] + "_" + \
+                datetime.now().strftime("%Y-%m-%d_%H%M%S")) + ".qif"
         logger.info("Writing unique transactions to unique file: %s" % file_name)
         dkb2qif.export_to(file_name)
     else:
         logger.info("Doing nothing, no new transactions.")
 
-    fetcher.logout()
 
 """
 Testing:
