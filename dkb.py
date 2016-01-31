@@ -375,9 +375,10 @@ class DkbConverter(object):
                 continue
             yield 'D%s' % self.format_date(line)
             yield 'T%s' % self.format_value(line)
-            yield 'M%s' % self.format_description(line)
             if line[self.COL_INFO].strip():
-                yield 'M%s' % self.format_info(line)
+                yield 'M%s: %s' % (self.format_description(line), self.format_info(line))
+            else:
+                yield 'M%s' % self.format_description(line)
             category = self.get_category(line)
             if category:
                 yield 'L%s' % category
